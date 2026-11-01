@@ -13,12 +13,16 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+type redisEvalClient interface {
+	Eval(script string, numKeys int, keys []string, args []interface{}) (interface{}, error)
+}
+
 type MCPRatelimitHandler struct {
-	redisClient *common.RedisClient
+	redisClient redisEvalClient
 	callbacks   api.FilterCallbackHandler
 	limit       int      // Maximum requests allowed per window
 	window      int      // Time window in seconds
-	whitelist   []string // Whitelist of UIDs that bypass rate limiting
+	whitelist   []string // Whitelist of consumers that bypass rate limiting
 	errorText   string   // Error text to be displayed
 }
 
@@ -26,7 +30,7 @@ type MCPRatelimitHandler struct {
 type MCPRatelimitConfig struct {
 	Limit     int      `json:"limit"`
 	Window    int      `json:"window"`
-	Whitelist []string `json:"white_list"` // List of UIDs that bypass rate limiting
+	Whitelist []string `json:"white_list"` // List of consumers that bypass rate limiting
 	ErrorText string   `json:"error_text"` // Error text to be displayed
 }
 
@@ -69,27 +73,22 @@ type LimitContext struct {
 }
 
 // TODO: needs to be refactored, rate limit should be registered as a request hook in MCP server
-func (h *MCPRatelimitHandler) HandleRatelimit(req *http.Request, body []byte) bool {
+func (h *MCPRatelimitHandler) HandleRatelimit(req *http.Request, serverName, consumer string, body []byte) bool {
+	if strings.TrimSpace(consumer) == "" {
+		h.callbacks.DecoderFilterCallbacks().SendLocalReply(http.StatusUnauthorized, "", nil, 0, "")
+		return false
+	}
 	if h.redisClient == nil {
 		return true
 	}
-	parts := strings.Split(req.URL.Path, "/")
-	if len(parts) < 3 {
-		h.callbacks.DecoderFilterCallbacks().SendLocalReply(http.StatusForbidden, "", nil, 0, "")
-		return false
-	}
-	serverName := parts[1]
-	uid := parts[2]
 
-	// Check if the UID is in whitelist
-	for _, whitelistedUID := range h.whitelist {
-		if whitelistedUID == uid {
-			return true // Bypass rate limiting for whitelisted UIDs
+	for _, whitelistedConsumer := range h.whitelist {
+		if whitelistedConsumer == consumer {
+			return true
 		}
 	}
 
-	// Build rate limit key using serverName, uid, window and limit
-	limitKey := fmt.Sprintf("mcp-server-limit:%s:%s:%d:%d", serverName, uid, h.window, h.limit)
+	limitKey := fmt.Sprintf("mcp-server-limit:%s:%s:%d:%d", serverName, consumer, h.window, h.limit)
 	keys := []string{limitKey}
 
 	args := []interface{}{h.limit, h.window}

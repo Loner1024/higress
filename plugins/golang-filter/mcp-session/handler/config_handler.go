@@ -26,10 +26,14 @@ func NewMCPConfigHandler(redisClient *common.RedisClient, callbacks api.FilterCa
 }
 
 // HandleConfigRequest processes configuration requests
-func (h *MCPConfigHandler) HandleConfigRequest(req *http.Request, body []byte) bool {
+func (h *MCPConfigHandler) HandleConfigRequest(req *http.Request, consumer string, body []byte) bool {
 	// Check if it's a configuration request
 	if !strings.HasSuffix(req.URL.Path, "/config") {
 		return false
+	}
+	if strings.TrimSpace(consumer) == "" {
+		h.sendErrorResponse(http.StatusUnauthorized, "UNAUTHORIZED", "Consumer authentication is required")
+		return true
 	}
 
 	// Extract serverName and uid from path
@@ -40,12 +44,16 @@ func (h *MCPConfigHandler) HandleConfigRequest(req *http.Request, body []byte) b
 	}
 	uid := pathParts[len(pathParts)-1]
 	serverName := pathParts[len(pathParts)-2]
+	if uid != consumer {
+		h.sendErrorResponse(http.StatusForbidden, "FORBIDDEN", "Path uid must match the authenticated consumer")
+		return true
+	}
 
 	switch req.Method {
 	case http.MethodGet:
-		return h.handleGetConfig(serverName, uid)
+		return h.handleGetConfig(serverName, consumer)
 	case http.MethodPost:
-		return h.handleStoreConfig(serverName, uid, body)
+		return h.handleStoreConfig(serverName, consumer, body)
 	default:
 		h.sendErrorResponse(http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 		return true
@@ -141,8 +149,8 @@ func (h *MCPConfigHandler) sendErrorResponse(status int, code string, message st
 }
 
 // GetEncodedConfig retrieves and encodes the configuration for a given server and uid
-func (h *MCPConfigHandler) GetEncodedConfig(serverName string, uid string) (string, error) {
-	conf, err := h.configStore.GetConfig(serverName, uid)
+func (h *MCPConfigHandler) GetEncodedConfig(serverName string, consumer string) (string, error) {
+	conf, err := h.configStore.GetConfig(serverName, consumer)
 	if err != nil {
 		return "", fmt.Errorf("failed to get config: %w", err)
 	}

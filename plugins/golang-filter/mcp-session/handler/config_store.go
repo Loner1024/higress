@@ -13,8 +13,8 @@ const (
 )
 
 // GetConfigStoreKey returns the Redis channel name for the given session ID
-func GetConfigStoreKey(serverName string, uid string) string {
-	return fmt.Sprintf("mcp-server-config:%s:%s", serverName, uid)
+func GetConfigStoreKey(serverName string, consumer string) string {
+	return fmt.Sprintf("mcp-server-config:%s:%s", serverName, consumer)
 }
 
 // ConfigResponse represents the response structure for configuration operations
@@ -29,9 +29,9 @@ type ConfigResponse struct {
 // ConfigStore defines the interface for configuration storage operations
 type ConfigStore interface {
 	// StoreConfig stores user configuration
-	StoreConfig(serverName string, uid string, config map[string]string) (*ConfigResponse, error)
+	StoreConfig(serverName string, consumer string, config map[string]string) (*ConfigResponse, error)
 	// GetConfig retrieves user configuration
-	GetConfig(serverName string, uid string) (map[string]string, error)
+	GetConfig(serverName string, consumer string) (map[string]string, error)
 }
 
 // RedisConfigStore implements configuration storage using Redis
@@ -47,8 +47,8 @@ func NewRedisConfigStore(redisClient *common.RedisClient) ConfigStore {
 }
 
 // StoreConfig stores configuration in Redis
-func (s *RedisConfigStore) StoreConfig(serverName string, uid string, config map[string]string) (*ConfigResponse, error) {
-	key := GetConfigStoreKey(serverName, uid)
+func (s *RedisConfigStore) StoreConfig(serverName string, consumer string, config map[string]string) (*ConfigResponse, error) {
+	key := GetConfigStoreKey(serverName, consumer)
 
 	// Convert config to JSON
 	configBytes, err := json.Marshal(config)
@@ -86,8 +86,8 @@ func (s *RedisConfigStore) StoreConfig(serverName string, uid string, config map
 }
 
 // GetConfig retrieves configuration from Redis
-func (s *RedisConfigStore) GetConfig(serverName string, uid string) (map[string]string, error) {
-	key := GetConfigStoreKey(serverName, uid)
+func (s *RedisConfigStore) GetConfig(serverName string, consumer string) (map[string]string, error) {
+	key := GetConfigStoreKey(serverName, consumer)
 
 	// Get from Redis
 	value, err := s.redisClient.Get(key)

@@ -494,7 +494,7 @@ type testMCPConfigHandler struct {
 	err     error
 }
 
-func (h *testMCPConfigHandler) HandleConfigRequest(*http.Request, []byte) bool {
+func (h *testMCPConfigHandler) HandleConfigRequest(*http.Request, string, []byte) bool {
 	return true
 }
 
@@ -551,12 +551,13 @@ func TestDecodeHeadersOnlySetsConfigFromDynamicLookup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			header := newTestRequestHeaders("/mcp/server/alice")
+			header := newTestRequestHeaders("/server/alice/mcp")
+			header.Set(consumerHeader, "alice")
 			header.Set(mcpServerConfigHeader, "client-value")
 			f := &filter{
 				config: &config{
 					enableUserLevelServer: true,
-					matchList:             []common.MatchRule{{MatchRuleDomain: "*", HostMatcher: common.ParseHostPattern("*"), MatchRuleType: common.PrefixMatch, MatchRulePath: "/mcp", UpstreamType: common.RestUpstream}},
+					matchList:             []common.MatchRule{{MatchRuleDomain: "*", HostMatcher: common.ParseHostPattern("*"), MatchRuleType: common.PrefixMatch, MatchRulePath: "/", UpstreamType: common.RestUpstream}},
 				},
 				mcpConfigHandler: tt.handler,
 			}
@@ -569,6 +570,64 @@ func TestDecodeHeadersOnlySetsConfigFromDynamicLookup(t *testing.T) {
 			}
 			if tt.expected != "" && (!ok || value != tt.expected) {
 				t.Fatalf("expected %q, got %q, present=%t", tt.expected, value, ok)
+			}
+		})
+	}
+}
+
+type testFilterCallbacks struct {
+	api.FilterCallbackHandler
+	decoder *testDecoderCallbacks
+}
+
+func (c *testFilterCallbacks) DecoderFilterCallbacks() api.DecoderFilterCallbacks {
+	return c.decoder
+}
+
+type testDecoderCallbacks struct {
+	api.DecoderFilterCallbacks
+	statusCode int
+	body       string
+}
+
+func (c *testDecoderCallbacks) SendLocalReply(responseCode int, bodyText string, _ map[string][]string, _ int64, _ string) {
+	c.statusCode = responseCode
+	c.body = bodyText
+}
+
+func TestUserLevelRequestsRequireMatchingConsumer(t *testing.T) {
+	api.SetCommonCAPI(&mockCommonCAPI{})
+	tests := []struct {
+		name       string
+		path       string
+		consumer   string
+		status     api.StatusType
+		statusCode int
+	}{
+		{name: "missing consumer", path: "/server/alice/mcp", status: api.LocalReply, statusCode: http.StatusUnauthorized},
+		{name: "matching consumer", path: "/server/alice/mcp", consumer: "alice", status: api.Continue},
+		{name: "mismatched path uid", path: "/server/bob/mcp", consumer: "alice", status: api.LocalReply, statusCode: http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			header := newTestRequestHeaders(tt.path)
+			if tt.consumer != "" {
+				header.Set(consumerHeader, tt.consumer)
+			}
+			decoder := &testDecoderCallbacks{}
+			f := &filter{
+				callbacks: &testFilterCallbacks{decoder: decoder},
+				config: &config{
+					enableUserLevelServer: true,
+					matchList:             []common.MatchRule{{MatchRuleDomain: "*", HostMatcher: common.ParseHostPattern("*"), MatchRuleType: common.PrefixMatch, MatchRulePath: "/", UpstreamType: common.RestUpstream}},
+				},
+				mcpConfigHandler: &testMCPConfigHandler{},
+			}
+			if status := f.DecodeHeaders(header, true); status != tt.status {
+				t.Fatalf("expected status %v, got %v", tt.status, status)
+			}
+			if tt.statusCode != 0 && decoder.statusCode != tt.statusCode {
+				t.Fatalf("expected local reply %d, got %d", tt.statusCode, decoder.statusCode)
 			}
 		})
 	}
@@ -617,15 +676,14 @@ func TestRestUpstreamBuffersBodyWhenRateLimitEnabled(t *testing.T) {
 	mockAPI := &mockCommonCAPI{}
 	api.SetCommonCAPI(mockAPI)
 
-	// Use a path with fewer than 3 segments so the config handler (which is
-	// nil in this test) is never queried; f.ratelimit is still set to true
-	// because enableUserLevelServer is enabled.
-	parsedURL, _ := url.Parse("http://example.com/mcp")
+	parsedURL, _ := url.Parse("http://example.com/server/alice")
 	f := &filter{
-		config:      &config{enableUserLevelServer: true},
-		matchedRule: common.MatchRule{UpstreamType: common.RestUpstream},
-		needProcess: true,
-		req:         &http.Request{Method: http.MethodPost, URL: parsedURL},
+		config:           &config{enableUserLevelServer: true},
+		matchedRule:      common.MatchRule{UpstreamType: common.RestUpstream},
+		needProcess:      true,
+		req:              &http.Request{Method: http.MethodPost, URL: parsedURL},
+		consumer:         "alice",
+		mcpConfigHandler: &testMCPConfigHandler{},
 	}
 
 	header := testHeaderMap{values: map[string]string{}}

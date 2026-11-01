@@ -18,6 +18,7 @@ import (
 const (
 	RedisNotEnabledResponseBody = "Redis is not enabled, SSE connection is not supported"
 	mcpServerConfigHeader       = "x-higress-mcpserver-config"
+	consumerHeader              = "x-mse-consumer"
 )
 
 // The callbacks in the filter, like `DecodeHeaders`, can be implemented on demand.
@@ -41,14 +42,16 @@ type filter struct {
 	sseServer          *common.SSEServer // SSE server instance for this filter (per-request, not shared)
 
 	userLevelConfig     bool
+	consumer            string
+	userLevelServerName string
 	mcpConfigHandler    mcpConfigHandler
 	ratelimit           bool
 	mcpRatelimitHandler *handler.MCPRatelimitHandler
 }
 
 type mcpConfigHandler interface {
-	HandleConfigRequest(req *http.Request, body []byte) bool
-	GetEncodedConfig(serverName, uid string) (string, error)
+	HandleConfigRequest(req *http.Request, consumer string, body []byte) bool
+	GetEncodedConfig(serverName, consumer string) (string, error)
 }
 
 // Callbacks which are called in request path
@@ -74,6 +77,14 @@ func (f *filter) DecodeHeaders(header api.RequestHeaderMap, endStream bool) api.
 		Method: requestUrl.Method,
 		URL:    requestUrl.ParsedURL,
 	}
+	if f.config.enableUserLevelServer {
+		consumer, _ := header.Get(consumerHeader)
+		f.consumer = strings.TrimSpace(consumer)
+		if f.consumer == "" {
+			f.callbacks.DecoderFilterCallbacks().SendLocalReply(http.StatusUnauthorized, "", nil, 0, "")
+			return api.LocalReply
+		}
+	}
 
 	if strings.HasSuffix(f.path, ConfigPathSuffix) && f.config.enableUserLevelServer {
 		if !requestUrl.InternalIP {
@@ -83,7 +94,7 @@ func (f *filter) DecodeHeaders(header api.RequestHeaderMap, endStream bool) api.
 		}
 		if strings.HasSuffix(f.path, ConfigPathSuffix) && requestUrl.Method == http.MethodGet {
 			api.LogDebugf("Handling config request: %s", f.path)
-			f.mcpConfigHandler.HandleConfigRequest(f.req, []byte{})
+			f.mcpConfigHandler.HandleConfigRequest(f.req, f.consumer, []byte{})
 			return api.LocalReply
 		}
 		f.userLevelConfig = true
@@ -115,15 +126,15 @@ func (f *filter) processMcpRequestHeadersForRestUpstream(header api.RequestHeade
 		f.proxyURL = requestUrl
 		if f.config.enableUserLevelServer {
 			parts := strings.Split(requestUrl.Path, "/")
-			if len(parts) >= 3 {
-				serverName := parts[1]
-				uid := parts[2]
-				// Get encoded config
-				encodedConfig, _ := f.mcpConfigHandler.GetEncodedConfig(serverName, uid)
-				if encodedConfig != "" {
-					header.Set(mcpServerConfigHeader, encodedConfig)
-					api.LogDebugf("Set x-higress-mcpserver-config Header for %s:%s", serverName, uid)
-				}
+			if len(parts) < 3 || parts[2] != f.consumer {
+				f.callbacks.DecoderFilterCallbacks().SendLocalReply(http.StatusForbidden, "", nil, 0, "")
+				return api.LocalReply
+			}
+			f.userLevelServerName = parts[1]
+			encodedConfig, _ := f.mcpConfigHandler.GetEncodedConfig(f.userLevelServerName, f.consumer)
+			if encodedConfig != "" {
+				header.Set(mcpServerConfigHeader, encodedConfig)
+				api.LogDebugf("Set x-higress-mcpserver-config Header for %s:%s", f.userLevelServerName, f.consumer)
 			}
 			f.ratelimit = true
 		}
@@ -190,29 +201,21 @@ func (f *filter) DecodeData(buffer api.BufferInstance, endStream bool) api.Statu
 	if f.userLevelConfig {
 		// Handle config POST request
 		api.LogDebugf("Handling config request: %s", f.path)
-		f.mcpConfigHandler.HandleConfigRequest(f.req, buffer.Bytes())
+		f.mcpConfigHandler.HandleConfigRequest(f.req, f.consumer, buffer.Bytes())
 		return api.LocalReply
 	} else if f.ratelimit {
 		if checkJSONRPCMethod(buffer.Bytes(), "tools/list") {
 			api.LogDebugf("Not a tools call request, skipping ratelimit")
 			return api.Continue
 		}
-		parts := strings.Split(f.req.URL.Path, "/")
-		if len(parts) < 3 {
-			api.LogWarnf("Access denied: no valid uid found")
-			f.callbacks.DecoderFilterCallbacks().SendLocalReply(http.StatusForbidden, "", nil, 0, "")
-			return api.LocalReply
-		}
-		serverName := parts[1]
-		uid := parts[2]
-		encodedConfig, err := f.mcpConfigHandler.GetEncodedConfig(serverName, uid)
+		encodedConfig, err := f.mcpConfigHandler.GetEncodedConfig(f.userLevelServerName, f.consumer)
 		if err != nil {
-			api.LogWarnf("Access denied: no valid config found for uid %s", uid)
+			api.LogWarnf("Access denied: no valid config found for consumer %s", f.consumer)
 			f.callbacks.DecoderFilterCallbacks().SendLocalReply(http.StatusForbidden, "", nil, 0, "")
 			return api.LocalReply
 		} else if encodedConfig == "" && checkJSONRPCMethod(buffer.Bytes(), "tools/call") {
-			api.LogDebugf("Empty config found for %s:%s", serverName, uid)
-			if !f.mcpRatelimitHandler.HandleRatelimit(f.req, buffer.Bytes()) {
+			api.LogDebugf("Empty config found for %s:%s", f.userLevelServerName, f.consumer)
+			if !f.mcpRatelimitHandler.HandleRatelimit(f.req, f.userLevelServerName, f.consumer, buffer.Bytes()) {
 				return api.LocalReply
 			}
 		}
