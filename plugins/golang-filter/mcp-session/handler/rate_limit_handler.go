@@ -22,7 +22,7 @@ type MCPRatelimitHandler struct {
 	callbacks   api.FilterCallbackHandler
 	limit       int      // Maximum requests allowed per window
 	window      int      // Time window in seconds
-	whitelist   []string // Whitelist of consumers that bypass rate limiting
+	whitelist   []string // Whitelist of consumers exempt from rate limiting
 	errorText   string   // Error text to be displayed
 }
 
@@ -30,7 +30,7 @@ type MCPRatelimitHandler struct {
 type MCPRatelimitConfig struct {
 	Limit     int      `json:"limit"`
 	Window    int      `json:"window"`
-	Whitelist []string `json:"white_list"` // List of consumers that bypass rate limiting
+	Whitelist []string `json:"white_list"` // List of consumers exempt from rate limiting
 	ErrorText string   `json:"error_text"` // Error text to be displayed
 }
 
