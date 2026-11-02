@@ -65,6 +65,11 @@ func Test_getApiName(t *testing.T) {
 		// Qwen
 		{"qwen reranks", "/v1/reranks", provider.ApiNameQwenV1Rerank},
 		{"qwen conversations", "/v1/conversations", provider.ApiNameQwenV1Conversations},
+		// Decision style
+		{"openai decisions", "/v1/decisions", provider.ApiNameDecisions},
+		{"system one", "/v1/systemone", provider.ApiNameSystemOne},
+		{"openai decisions with prefix", "/gateway/v1/decisions", provider.ApiNameDecisions},
+		{"system one with prefix", "/gateway/v1/systemone", provider.ApiNameSystemOne},
 		// Unknown
 		{"unknown", "/v1/unknown", ""},
 	}

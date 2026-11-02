@@ -81,6 +81,9 @@ var (
 		// Qwen style
 		{provider.PathQwenV1Reranks, provider.ApiNameQwenV1Rerank},
 		{provider.PathQwenV1Conversations, provider.ApiNameQwenV1Conversations},
+		// Decision style
+		{provider.PathOpenAIDecisions, provider.ApiNameDecisions},
+		{provider.PathSystemOne, provider.ApiNameSystemOne},
 	}
 	pathPatternToApiName = []pair[*regexp.Regexp, provider.ApiName]{
 		// OpenAI style

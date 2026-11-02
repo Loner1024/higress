@@ -128,6 +128,26 @@ OpenAI 所对应的 `type` 为 `openai`。它特有的配置字段如下:
 | `openaiCustomUrl`    | string   | 非必填   | -      | 基于 OpenAI 协议的自定义后端 URL，例如: <www.example.com/myai/v1/chat/completions> |
 | `responseJsonSchema` | object   | 非必填   | -      | 预先定义 OpenAI 响应需满足的 Json Schema, 注意目前仅特定的几种模型支持该用法       |
 
+#### TypeSafe System One
+
+TypeSafe 所对应的 `type` 为 `typesafe`。插件同时接受两种决策请求：
+
+- `POST /v1/systemone`：TypeSafe 原生格式，`state` 加 `questions` 映射，直接转发。
+- `POST /v1/decisions`：OpenAI Decisions 格式，`input` 加 `questions` 数组，插件转换为 System One 后转发，并把响应转换回 OpenAI 格式。
+
+两种路由都支持 `modelMapping`、`apiTokens` 认证、`basePath`/`providerBasePath` 和 `providerDomain`。未配置 `apiTokens` 时沿用客户端请求的 `Authorization` 头。`TypeSafe-Danger-Zone-*` 请求头会原样透传。
+
+```yaml
+provider:
+  type: typesafe
+  apiTokens:
+    - "YOUR_TYPESAFE_API_KEY"
+  modelMapping:
+    "luna": "jev-latest"
+```
+
+当前第一版支持 `noul`/`predicate`、`choice`、`score`、`box` 问题；`/v1/decisions` 中的 `input_image`、`audio` 和 `videos` 会返回 400，原生 `/v1/systemone` 的 `assets` 和图片头不受影响。
+
 #### Azure OpenAI
 
 Azure OpenAI 所对应的 `type` 为 `azure`。它特有的配置字段如下：

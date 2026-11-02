@@ -81,6 +81,11 @@ const (
 	ApiNameAnthropicComplete           ApiName = "anthropic/v1/complete"
 	ApiNameVertexRaw                   ApiName = "vertex/raw"
 
+	// Decision APIs. The OpenAI shape and the System One shape share one
+	// provider-neutral representation in provider/decision.
+	ApiNameDecisions ApiName = "openai/v1/decisions"
+	ApiNameSystemOne ApiName = "typesafe/v1/systemone"
+
 	// OpenAI
 	PathOpenAIPrefix                               = "/v1"
 	PathOpenAICompletions                          = "/v1/completions"
@@ -114,6 +119,10 @@ const (
 	PathOpenAIRetrieveVideo                        = "/v1/videos/{video_id}"
 	PathOpenAIVideoRemix                           = "/v1/videos/{video_id}/remix"
 	PathOpenAIRetrieveVideoContent                 = "/v1/videos/{video_id}/content"
+
+	// Decision style
+	PathOpenAIDecisions = "/v1/decisions"
+	PathSystemOne       = "/v1/systemone"
 
 	// Anthropic
 	PathAnthropicMessages            = "/v1/messages"
@@ -165,6 +174,7 @@ const (
 	providerTypeVllm       = "vllm"
 	providerTypeGeneric    = "generic"
 	providerTypeKling      = "kling"
+	providerTypeTypesafe   = "typesafe"
 
 	protocolOpenAI   = "openai"
 	protocolOriginal = "original"
@@ -272,6 +282,7 @@ var (
 		providerTypeVllm:       &vllmProviderInitializer{},
 		providerTypeGeneric:    &genericProviderInitializer{},
 		providerTypeKling:      &klingProviderInitializer{},
+		providerTypeTypesafe:   &typesafeProviderInitializer{},
 	}
 )
 
@@ -756,7 +767,9 @@ func (c *ProviderConfig) FromJson(json gjson.Result) {
 			string(ApiNameKlingImageToVideo),
 			string(ApiNameKlingRetrieveImageVideo),
 			string(ApiNameRetrieveVideoContent),
-			string(ApiNameVideoRemix):
+			string(ApiNameVideoRemix),
+			string(ApiNameDecisions),
+			string(ApiNameSystemOne):
 			c.capabilities[capability] = pathJson.String()
 		}
 	}
@@ -1528,7 +1541,9 @@ func (c *ProviderConfig) needToProcessRequestBody(apiName ApiName) bool {
 		ApiNameGeminiGenerateContent,
 		ApiNameGeminiStreamGenerateContent,
 		ApiNameAnthropicMessages,
-		ApiNameAnthropicCountTokens:
+		ApiNameAnthropicCountTokens,
+		ApiNameDecisions,
+		ApiNameSystemOne:
 		return true
 	}
 	return false
