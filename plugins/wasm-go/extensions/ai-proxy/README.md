@@ -148,6 +148,12 @@ provider:
 
 当前第一版支持 `noul`/`predicate`、`choice`、`score`、`box` 问题；`/v1/decisions` 中的 `input_image`、`audio` 和 `videos` 会返回 400，原生 `/v1/systemone` 的 `assets` 和图片头不受影响。
 
+**当前限制**
+
+- 上游只实现了 TypeSafe。`provider.type: openai` 的原生 `/v1/decisions` 转发本轮不做，`/v1/decisions` 目前总是转换到 System One。
+- `/v1/decisions` 不接受 `input_image`。需要图片或 `box` 问题时，走原生 `/v1/systemone` 的 `assets`，并自行携带 `TypeSafe-Danger-Zone-Images: true`。
+- `/v1/decisions` 的 `audio` 和 `videos` 同样不支持，会返回 400。
+
 #### Azure OpenAI
 
 Azure OpenAI 所对应的 `type` 为 `azure`。它特有的配置字段如下：

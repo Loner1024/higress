@@ -112,6 +112,32 @@ For OpenAI, the corresponding `type` is `openai`. Its unique configuration field
 | `openaiCustomUrl` | string   | Optional   | -      | Custom backend URL based on the OpenAI protocol, e.g., www.example.com/myai/v1/chat/completions |
 | `responseJsonSchema` | object | Optional | - | Predefined Json Schema that OpenAI responses must adhere to; note that currently only a few specific models support this usage|
 
+#### TypeSafe System One
+
+For TypeSafe, the corresponding `type` is `typesafe`. The plugin accepts two decision request formats:
+
+- `POST /v1/systemone`: TypeSafe's native shape (`state` plus a `questions` map). The body is forwarded unchanged apart from model mapping.
+- `POST /v1/decisions`: OpenAI Decisions (`input` plus a `questions` array). The plugin converts it to System One and converts the response back to the OpenAI shape.
+
+Both routes support `modelMapping`, `apiTokens`, `basePath`/`providerBasePath`, `providerDomain`, and the existing failover/retry settings. Without `apiTokens`, the client's `Authorization` header is forwarded. `TypeSafe-Danger-Zone-*` headers are passed through.
+
+```yaml
+provider:
+  type: typesafe
+  apiTokens:
+    - "YOUR_TYPESAFE_API_KEY"
+  modelMapping:
+    "luna": "jev-latest"
+```
+
+The first version supports `noul`/`predicate`, `choice`, `score`, and `box` questions. `input_image`, `audio`, and `videos` on `/v1/decisions` return 400; native `/v1/systemone` `assets` and image headers are unaffected.
+
+**Current limitations**
+
+- Only TypeSafe is implemented as an upstream. Native OpenAI `/v1/decisions` forwarding is not part of this change; `/v1/decisions` always translates to System One.
+- `/v1/decisions` does not accept `input_image`. For images or `box` questions, use native `/v1/systemone` with `assets` and send `TypeSafe-Danger-Zone-Images: true` yourself.
+- `audio` and `videos` on `/v1/decisions` are unsupported and return 400.
+
 #### Azure OpenAI
 
 For Azure OpenAI, the corresponding `type` is `azure`. Its unique configuration field is:
