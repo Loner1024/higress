@@ -187,6 +187,29 @@ func TestSystemOneRoundTrip(t *testing.T) {
 	require.JSONEq(t, string(body), string(encoded))
 }
 
+func TestOpenAIInputMessagesBecomeSystemOneState(t *testing.T) {
+	body := []byte(`{
+		"model": "luna",
+		"input": [
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "first"}]},
+			{"type": "message", "role": "assistant", "content": "second"}
+		],
+		"questions": [{"type": "predicate", "name": "ok", "instructions": "Is it ok?"}]
+	}`)
+	request, err := ParseOpenAIRequest(body)
+	require.NoError(t, err)
+	encoded, err := request.SystemOneBody()
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"model": "luna",
+		"state": [
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "first"}]},
+			{"type": "message", "role": "assistant", "content": "second"}
+		],
+		"questions": {"ok": {"type": "noul", "instructions": "Is it ok?"}}
+	}`, string(encoded))
+}
+
 func TestOpenAIRejectsInvalidRequests(t *testing.T) {
 	tests := []struct {
 		name string

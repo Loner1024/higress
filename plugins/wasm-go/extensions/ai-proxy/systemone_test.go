@@ -153,6 +153,27 @@ func TestTypesafeSystemOneRouteEndToEnd(t *testing.T) {
 	})
 }
 
+func TestTypesafeForwardsClientAuthorization(t *testing.T) {
+	wasmtest.RunGoTest(t, func(t *testing.T) {
+		host, status := wasmtest.NewTestHost(json.RawMessage(`{
+			"provider": {"type": "typesafe"}
+		}`))
+		require.Equal(t, types.OnPluginStartStatusOK, status)
+		defer host.Reset()
+
+		host.CallOnHttpRequestHeaders([][2]string{
+			{":method", "POST"},
+			{":path", "/v1/systemone"},
+			{":authority", "gateway.example.com"},
+			{"content-type", "application/json"},
+			{"authorization", "Bearer client-key"},
+		})
+		headers := headerMap(host.GetRequestHeaders())
+		require.Equal(t, "Bearer client-key", headers["authorization"])
+		host.CompleteHttp()
+	})
+}
+
 func TestTypesafeDecisionsRouteRejectsInvalidBody(t *testing.T) {
 	wasmtest.RunGoTest(t, func(t *testing.T) {
 		host, status := wasmtest.NewTestHost(json.RawMessage(`{
