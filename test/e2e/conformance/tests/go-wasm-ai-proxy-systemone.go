@@ -83,6 +83,44 @@ var WasmPluginsAiProxySystemOne = suite.ConformanceTest{
 			},
 			{
 				Meta: http.AssertionMeta{
+					TestCaseName:  "systemone route: box question passes through",
+					CompareTarget: http.CompareTargetResponse,
+				},
+				Request: http.AssertionRequest{
+					ActualRequest: http.Request{
+						Host:        "api.typesafe.ai",
+						Path:        "/v1/systemone",
+						Method:      "POST",
+						ContentType: http.ContentTypeApplicationJson,
+						Body: []byte(`{
+							"model": "jev",
+							"state": "Find the failing chart",
+							"questions": {
+								"area": {"type": "box", "instructions": "Find the failing chart"}
+							}
+						}`),
+					},
+				},
+				Response: http.AssertionResponse{
+					ExpectedResponse: http.Response{
+						StatusCode:  200,
+						ContentType: http.ContentTypeApplicationJson,
+						Body: []byte(`{
+							"model": "jev-latest",
+							"answers": {
+								"area": {
+									"type": "box",
+									"box": {"top": 0.1, "bottom": 0.2, "left": 0.3, "right": 0.4},
+									"confidence": 0.9
+								}
+							},
+							"usage": {"input_tokens": 10, "output_tokens": 2}
+						}`),
+					},
+				},
+			},
+			{
+				Meta: http.AssertionMeta{
 					TestCaseName:  "decisions route: OpenAI request converted to System One and back",
 					CompareTarget: http.CompareTargetResponse,
 				},
@@ -141,6 +179,30 @@ var WasmPluginsAiProxySystemOne = suite.ConformanceTest{
 							}
 						}`),
 					},
+				},
+			},
+			{
+				Meta: http.AssertionMeta{
+					TestCaseName:  "decisions route: box question is rejected locally",
+					CompareTarget: http.CompareTargetResponse,
+				},
+				Request: http.AssertionRequest{
+					ActualRequest: http.Request{
+						Host:        "api.typesafe.ai",
+						Path:        "/v1/decisions",
+						Method:      "POST",
+						ContentType: http.ContentTypeApplicationJson,
+						Body: []byte(`{
+							"model": "luna",
+							"input": "Find the failing chart",
+							"questions": [
+								{"type": "box", "name": "area", "instructions": "Find the failing chart"}
+							]
+						}`),
+					},
+				},
+				Response: http.AssertionResponse{
+					ExpectedResponse: http.Response{StatusCode: 400},
 				},
 			},
 			{
