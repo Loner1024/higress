@@ -199,6 +199,46 @@ func TestTypesafeDecisionsRouteRejectsInvalidBody(t *testing.T) {
 	})
 }
 
+func TestNonTypesafeProviderDecisionPathsPassThrough(t *testing.T) {
+	wasmtest.RunGoTest(t, func(t *testing.T) {
+		for _, path := range []string{"/v1/decisions", "/v1/systemone"} {
+			t.Run(path, func(t *testing.T) {
+				host, status := wasmtest.NewTestHost(json.RawMessage(`{
+					"provider": {"type": "deepseek", "apiTokens": ["deepseek-key"]}
+				}`))
+				require.Equal(t, types.OnPluginStartStatusOK, status)
+				defer host.Reset()
+
+				require.Equal(t, types.HeaderStopIteration, host.CallOnHttpRequestHeaders([][2]string{
+					{":method", "POST"},
+					{":path", path},
+					{":authority", "gateway.example.com"},
+					{"content-type", "application/json"},
+				}))
+				// deepseek does not own these API names, so the original path
+				// must survive instead of being rejected as unsupported.
+				require.Equal(t, path, headerMap(host.GetRequestHeaders())[":path"])
+				require.Nil(t, host.GetLocalResponse())
+
+				body := []byte(`{"model":"m","input":"x","questions":[{"type":"predicate","name":"q","instructions":"q"}]}`)
+				require.Equal(t, types.ActionContinue, host.CallOnHttpRequestBody(body))
+				require.Nil(t, host.GetLocalResponse())
+				require.JSONEq(t, string(body), string(host.GetRequestBody()))
+
+				require.NoError(t, host.SetProperty([]string{"response", "code_details"}, []byte("via_upstream")))
+				require.Equal(t, types.ActionContinue, host.CallOnHttpResponseHeaders([][2]string{
+					{":status", "200"},
+					{"content-type", "application/json"},
+				}))
+				response := []byte(`{"ok":true}`)
+				require.Equal(t, types.ActionContinue, host.CallOnHttpResponseBody(response))
+				require.JSONEq(t, string(response), string(host.GetResponseBody()))
+				host.CompleteHttp()
+			})
+		}
+	})
+}
+
 func headerMap(headers [][2]string) map[string]string {
 	result := make(map[string]string, len(headers))
 	for _, header := range headers {

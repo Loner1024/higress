@@ -270,6 +270,14 @@ func onHttpRequestHeader(ctx wrapper.HttpContext, pluginConfig config.PluginConf
 		}
 	}
 
+	// /v1/decisions and /v1/systemone belong to the typesafe provider. For any
+	// other provider these paths are unknown, so restore the old pass-through
+	// behavior instead of letting the provider fail with a local 500.
+	if (apiName == provider.ApiNameDecisions || apiName == provider.ApiNameSystemOne) && !providerConfig.IsSupportedAPI(apiName) {
+		log.Debugf("[onHttpRequestHeader] provider %s does not support %s, pass through", activeProvider.GetProviderType(), apiName)
+		apiName = ""
+	}
+
 	if contentType, _ := proxywasm.GetHttpRequestHeader(util.HeaderContentType); contentType != "" && !isSupportedRequestContentType(apiName, contentType) {
 		ctx.DontReadRequestBody()
 		log.Debugf("[onHttpRequestHeader] unsupported content type for api %s: %s, will not process the request body", apiName, contentType)
