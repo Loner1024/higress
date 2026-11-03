@@ -20,8 +20,8 @@ type Request struct {
 	Model            string
 	Input            Input
 	Questions        []Question
-	SafetyIdentifier string
-	Extras           map[string]json.RawMessage
+	SafetyIdentifier string // accepted on /v1/decisions but not forwarded
+	Stream           bool
 
 	HasAudio bool
 	HasVideo bool

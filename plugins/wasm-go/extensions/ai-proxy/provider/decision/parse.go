@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 )
 
@@ -15,130 +14,15 @@ const (
 	maxScoreLevels = 10
 )
 
-// ParseSystemOneRequest decodes a TypeSafe POST /v1/systemone request.
-func ParseSystemOneRequest(body []byte) (*Request, error) {
+// SystemOneRequestModel validates a native TypeSafe POST /v1/systemone body
+// and returns its model. Everything else stays byte-preserving, so unknown
+// fields and future question types reach TypeSafe untouched.
+func SystemOneRequestModel(body []byte) (string, error) {
 	root, err := decodeObject(body)
 	if err != nil {
-		return nil, fmt.Errorf("systemone request must be a JSON object: %w", err)
+		return "", fmt.Errorf("systemone request must be a JSON object: %w", err)
 	}
-	state, ok := root["state"]
-	if !ok {
-		return nil, errors.New("state is required")
-	}
-	model, err := requiredString(root["model"], "model")
-	if err != nil {
-		return nil, err
-	}
-	questionsBody, ok := root["questions"]
-	if !ok {
-		return nil, errors.New("questions is required")
-	}
-	questions, err := decodeObject(questionsBody)
-	if err != nil {
-		return nil, fmt.Errorf("questions must be an object: %w", err)
-	}
-	if len(questions) == 0 {
-		return nil, errors.New("at least one question is required")
-	}
-	if len(questions) > maxQuestions {
-		return nil, fmt.Errorf("at most %d questions are allowed", maxQuestions)
-	}
-
-	keys := sortedKeys(questions)
-	normalized := make([]Question, 0, len(keys))
-	for _, key := range keys {
-		question, err := parseSystemOneQuestion(key, questions[key])
-		if err != nil {
-			return nil, fmt.Errorf("question %q: %w", key, err)
-		}
-		normalized = append(normalized, question)
-	}
-
-	return &Request{
-		Model:     model,
-		Input:     Input{State: cloneRaw(state)},
-		Questions: normalized,
-		Extras:    systemOneExtras(root),
-	}, nil
-}
-
-func systemOneExtras(root map[string]json.RawMessage) map[string]json.RawMessage {
-	var extras map[string]json.RawMessage
-	for key, value := range root {
-		switch key {
-		case "model", "state", "questions":
-			continue
-		}
-		if extras == nil {
-			extras = make(map[string]json.RawMessage)
-		}
-		extras[key] = cloneRaw(value)
-	}
-	return extras
-}
-
-func parseSystemOneQuestion(key string, body json.RawMessage) (Question, error) {
-	raw, err := decodeObject(body)
-	if err != nil {
-		return Question{}, errors.New("must be an object")
-	}
-	kind, err := requiredString(raw["type"], "type")
-	if err != nil {
-		return Question{}, err
-	}
-	question := Question{Name: key, Key: key, Instructions: cloneRaw(raw["instructions"])}
-	switch kind {
-	case "noul":
-		question.Type = TypePredicate
-		question.Criteria = cloneRaw(raw["criteria"])
-	case "choice":
-		question.Type = TypeChoice
-		criteriaBody, ok := raw["criteria"]
-		if !ok {
-			return Question{}, errors.New("choice question requires criteria")
-		}
-		criteria, err := decodeObject(criteriaBody)
-		if err != nil {
-			return Question{}, fmt.Errorf("choice criteria must be an object: %w", err)
-		}
-		if len(criteria) == 0 {
-			return Question{}, errors.New("choice criteria must not be empty")
-		}
-		if len(criteria) > maxChoices {
-			return Question{}, fmt.Errorf("choice allows at most %d options", maxChoices)
-		}
-		for _, option := range sortedKeys(criteria) {
-			question.Choices = append(question.Choices, Choice{
-				Value:       option,
-				Key:         option,
-				Description: cloneRaw(criteria[option]),
-			})
-		}
-	case "score":
-		question.Type = TypeScore
-		criteriaBody, ok := raw["criteria"]
-		if !ok {
-			return Question{}, errors.New("score question requires criteria")
-		}
-		criteria, err := decodeArray(criteriaBody)
-		if err != nil {
-			return Question{}, fmt.Errorf("score criteria must be an array: %w", err)
-		}
-		if len(criteria) == 0 {
-			return Question{}, errors.New("score criteria must not be empty")
-		}
-		if len(criteria) > maxScoreLevels {
-			return Question{}, fmt.Errorf("score allows at most %d levels", maxScoreLevels)
-		}
-		for _, criterion := range criteria {
-			question.Levels = append(question.Levels, Level{Label: cloneRaw(criterion)})
-		}
-	case "box":
-		question.Type = TypeBox
-	default:
-		return Question{}, fmt.Errorf("unsupported question type %q", kind)
-	}
-	return question, nil
+	return requiredString(root["model"], "model")
 }
 
 // ParseOpenAIRequest decodes an OpenAI Decisions POST /v1/decisions request.
@@ -168,6 +52,11 @@ func ParseOpenAIRequest(body []byte) (*Request, error) {
 	request.HasAudio = rawHasEntries(root["audio"])
 	request.HasVideo = rawHasEntries(root["videos"])
 	request.SafetyIdentifier, _ = optionalString(root["safety_identifier"])
+	stream, err := optionalBool(root["stream"])
+	if err != nil {
+		return nil, errors.New("stream must be a boolean")
+	}
+	request.Stream = stream
 
 	questionsBody, ok := root["questions"]
 	if !ok {
@@ -195,11 +84,11 @@ func ParseOpenAIRequest(body []byte) (*Request, error) {
 	}
 	assignNames(request.Questions)
 
-	if model := rawText(root["model"]); model != "" {
-		request.Model = model
-	} else {
-		return nil, errors.New("model is required")
+	model, err := requiredString(root["model"], "model")
+	if err != nil {
+		return nil, err
 	}
+	request.Model = model
 	return request, nil
 }
 
@@ -212,8 +101,12 @@ func parseOpenAIQuestion(body json.RawMessage) (Question, error) {
 	if err != nil {
 		return Question{}, err
 	}
+	name, err := optionalString(raw["name"])
+	if err != nil {
+		return Question{}, errors.New("name must be a string")
+	}
 	question := Question{
-		Name:         rawText(raw["name"]),
+		Name:         name,
 		Instructions: cloneRaw(raw["instructions"]),
 	}
 	if !rawPresent(question.Instructions) {
@@ -302,7 +195,8 @@ func parseOpenAIQuestion(body json.RawMessage) (Question, error) {
 
 // ValidateForSystemOne rejects inputs TypeSafe cannot accept. Images are
 // rejected until the asset/image path is implemented; audio and video are not
-// part of the System One protocol.
+// part of the System One protocol. Box questions need an image, and streaming
+// has no System One equivalent.
 func (r *Request) ValidateForSystemOne() error {
 	if r.Input.HasImage {
 		return errors.New("input_image is not supported by the System One route yet")
@@ -312,6 +206,14 @@ func (r *Request) ValidateForSystemOne() error {
 	}
 	if r.HasVideo {
 		return errors.New("video input is not supported by the System One route")
+	}
+	if r.Stream {
+		return errors.New("stream is not supported on /v1/decisions")
+	}
+	for _, question := range r.Questions {
+		if question.Type == TypeBox {
+			return errors.New("box questions are not supported on /v1/decisions because image input is not supported; use /v1/systemone")
+		}
 	}
 	return nil
 }
@@ -396,6 +298,17 @@ func optionalString(raw json.RawMessage) (string, error) {
 	return value, nil
 }
 
+func optionalBool(raw json.RawMessage) (bool, error) {
+	if !rawPresent(raw) {
+		return false, nil
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, err
+	}
+	return value, nil
+}
+
 func decodeObject(raw json.RawMessage) (map[string]json.RawMessage, error) {
 	var value map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &value); err != nil {
@@ -416,15 +329,6 @@ func decodeArray(raw json.RawMessage) ([]json.RawMessage, error) {
 		return nil, errors.New("expected array")
 	}
 	return value, nil
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func cloneRaw(raw json.RawMessage) json.RawMessage {

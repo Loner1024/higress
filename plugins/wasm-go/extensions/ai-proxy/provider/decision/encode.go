@@ -49,11 +49,6 @@ func (r *Request) SystemOneBody() ([]byte, error) {
 		"state":     state,
 		"questions": questions,
 	}
-	for key, value := range r.Extras {
-		if _, exists := root[key]; !exists {
-			root[key] = value
-		}
-	}
 	return json.Marshal(root)
 }
 
@@ -206,87 +201,6 @@ func openAIAnswer(question Question, answer Answer) map[string]any {
 	return encoded
 }
 
-// SystemOneResponseBody renders a normalized response in the System One shape.
-// It is used when an OpenAI decisions request is served by a System One
-// upstream, and is also the inverse of ParseSystemOneResponse.
-func (r *Request) SystemOneResponseBody(response *Response) ([]byte, error) {
-	if response == nil {
-		return nil, errors.New("response is required")
-	}
-	answers := make(map[string]any, len(r.Questions))
-	for _, question := range r.Questions {
-		answer, ok := response.Answers[question.Key]
-		if !ok || answer.Type != question.Type {
-			continue
-		}
-		encoded, err := systemOneAnswer(question, answer)
-		if err != nil {
-			return nil, err
-		}
-		answers[question.Key] = encoded
-	}
-	usage := response.Usage
-	if usage == nil {
-		usage = &Usage{}
-	}
-	model := response.Model
-	if model == "" {
-		model = r.Model
-	}
-	return json.Marshal(map[string]any{
-		"model":   model,
-		"answers": answers,
-		"usage":   usage,
-	})
-}
-
-func systemOneAnswer(question Question, answer Answer) (map[string]any, error) {
-	encoded := map[string]any{"type": string(question.Type)}
-	switch question.Type {
-	case TypePredicate:
-		if answer.Noul == nil {
-			return nil, fmt.Errorf("answer %q has no noul value", question.Key)
-		}
-		encoded["type"] = "noul"
-		encoded["noul"] = *answer.Noul
-	case TypeChoice:
-		if answer.Choice == nil {
-			return nil, fmt.Errorf("answer %q has no choice value", question.Key)
-		}
-		encoded["type"] = "choice"
-		encoded["choice"] = *answer.Choice
-		encoded["probabilities"] = answer.Probabilities
-		if answer.Confidence != nil {
-			encoded["confidence"] = *answer.Confidence
-		}
-	case TypeScore:
-		if answer.Score == nil {
-			return nil, fmt.Errorf("answer %q has no score value", question.Key)
-		}
-		legend := make(map[string]string, len(question.Levels))
-		for i, level := range question.Levels {
-			legend[strconv.Itoa(i)] = rawText(level.Label)
-		}
-		encoded["type"] = "score"
-		encoded["score"] = *answer.Score
-		encoded["legend"] = legend
-		encoded["probabilities"] = answer.Probabilities
-		if answer.Confidence != nil {
-			encoded["confidence"] = *answer.Confidence
-		}
-	case TypeBox:
-		if answer.Box == nil {
-			return nil, fmt.Errorf("answer %q has no box value", question.Key)
-		}
-		encoded["type"] = "box"
-		encoded["box"] = answer.Box
-		if answer.Confidence != nil {
-			encoded["confidence"] = *answer.Confidence
-		}
-	}
-	return encoded, nil
-}
-
 // ParseSystemOneResponse decodes a TypeSafe /v1/systemone response.
 func ParseSystemOneResponse(body []byte) (*Response, error) {
 	root, err := decodeObject(body)
@@ -305,11 +219,14 @@ func ParseSystemOneResponse(body []byte) (*Response, error) {
 	}
 	answersBody, ok := root["answers"]
 	if !ok {
-		return response, nil
+		return nil, errors.New("answers is required")
 	}
 	answers, err := decodeObject(answersBody)
 	if err != nil {
 		return nil, fmt.Errorf("answers must be an object: %w", err)
+	}
+	if len(answers) == 0 {
+		return nil, errors.New("answers must not be empty")
 	}
 	for key, body := range answers {
 		answer, err := parseSystemOneAnswer(body)
@@ -353,10 +270,10 @@ func parseSystemOneAnswer(body json.RawMessage) (Answer, error) {
 		answer.Type = TypeScore
 	case "box":
 		answer.Type = TypeBox
-	case "refusal":
-		answer.Type = TypeRefusal
 	default:
-		return Answer{}, fmt.Errorf("unsupported answer type %q", raw.Type)
+		// Explicit refusals and answer kinds this plugin does not know are both
+		// rendered as a refusal for the matching question.
+		answer.Type = TypeRefusal
 	}
 	return answer, nil
 }

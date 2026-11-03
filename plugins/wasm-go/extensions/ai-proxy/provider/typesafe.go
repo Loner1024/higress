@@ -11,7 +11,6 @@ import (
 	"github.com/higress-group/proxy-wasm-go-sdk/proxywasm/types"
 	"github.com/higress-group/wasm-go/pkg/log"
 	"github.com/higress-group/wasm-go/pkg/wrapper"
-	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -25,6 +24,13 @@ const (
 type typesafeProviderInitializer struct{}
 
 func (m *typesafeProviderInitializer) ValidateConfig(config *ProviderConfig) error {
+	// The OpenAI /v1/decisions translation only runs when the plugin owns the
+	// protocol. With protocol: original the body would pass through untranslated
+	// while the path still becomes /v1/systemone, and the response could not be
+	// mapped back.
+	if config.IsOriginal() {
+		return errors.New("typesafe provider does not support protocol: original")
+	}
 	return nil
 }
 
@@ -79,9 +85,9 @@ func (m *typesafeProvider) TransformRequestBody(ctx wrapper.HttpContext, apiName
 	case ApiNameSystemOne:
 		// Keep the native body intact: assets, images, and future fields must
 		// reach TypeSafe unchanged. Only the model mapping is applied.
-		model := gjson.GetBytes(body, "model").String()
-		if model == "" {
-			return nil, errors.New("model is required")
+		model, err := decision.SystemOneRequestModel(body)
+		if err != nil {
+			return nil, err
 		}
 		mapped := getMappedModel(model, m.config.modelMapping)
 		ctx.SetContext(ctxKeyOriginalRequestModel, model)

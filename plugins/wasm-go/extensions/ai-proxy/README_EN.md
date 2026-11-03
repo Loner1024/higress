@@ -130,13 +130,16 @@ provider:
     "luna": "jev-latest"
 ```
 
-The first version supports `noul`/`predicate`, `choice`, `score`, and `box` questions. `input_image`, `audio`, and `videos` on `/v1/decisions` return 400; native `/v1/systemone` `assets` and image headers are unaffected.
+The first version supports `noul`/`predicate`, `choice`, `score`, and `box` questions on native `/v1/systemone`. On `/v1/decisions`, `predicate`, `choice`, and `score` work; `box` returns 400 because it needs an image. `input_image`, `audio`, and `videos` on `/v1/decisions` return 400; native `/v1/systemone` `assets` and image headers are unaffected.
 
 **Current limitations**
 
 - Only TypeSafe is implemented as an upstream. Native OpenAI `/v1/decisions` forwarding is not part of this change; `/v1/decisions` always translates to System One.
 - `/v1/decisions` does not accept `input_image`. For images or `box` questions, use native `/v1/systemone` with `assets` and send `TypeSafe-Danger-Zone-Images: true` yourself.
 - `audio` and `videos` on `/v1/decisions` are unsupported and return 400.
+- `safety_identifier` is accepted but ignored; System One has no equivalent field.
+- `stream` is not supported on `/v1/decisions`. `stream: true` returns 400.
+- `protocol: original` is rejected for `type: typesafe`; the plugin must own the protocol to translate `/v1/decisions`.
 
 #### Azure OpenAI
 

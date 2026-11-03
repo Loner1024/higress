@@ -1,7 +1,6 @@
 package decision
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -153,38 +152,121 @@ func TestSystemOneResponseToOpenAI(t *testing.T) {
 	}`, string(encoded))
 }
 
-func TestSystemOneRoundTrip(t *testing.T) {
-	body := []byte(`{
-		"model": "jev-latest",
-		"state": {"ticket": "payouts failing", "days": 3},
-		"assets": {
-			"photo": {"type": "image", "format": "png", "data_base64": "AAAA"}
+func TestSystemOneResponseRejectsMissingOrEmptyAnswers(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "missing answers",
+			body: `{"model":"jev-1.13.0","usage":{"input_tokens":1,"output_tokens":1}}`,
+			want: "answers is required",
 		},
-		"questions": {
-			"urgent": {
-				"type": "noul",
-				"instructions": "Is this urgent?",
-				"criteria": {"true": "needs action today", "false": "can wait"}
-			},
-			"team": {
-				"type": "choice",
-				"instructions": "Which team?",
-				"criteria": {"billing": "payments", "technical": null}
-			},
-			"severity": {
-				"type": "score",
-				"instructions": "How severe?",
-				"criteria": ["low", {"label": "high", "reason": "outage"}]
-			},
-			"area": {"type": "box", "instructions": "the failing chart"}
-		}
-	}`)
+		{
+			name: "empty answers",
+			body: `{"model":"jev-1.13.0","answers":{}}`,
+			want: "answers must not be empty",
+		},
+		{
+			name: "null answers",
+			body: `{"model":"jev-1.13.0","answers":null}`,
+			want: "answers must be an object",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseSystemOneResponse([]byte(tt.body))
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
 
-	request, err := ParseSystemOneRequest(body)
+func TestSystemOneResponseUnknownAnswerTypeBecomesRefusal(t *testing.T) {
+	request, err := ParseOpenAIRequest([]byte(`{
+		"model": "luna",
+		"input": "hello",
+		"questions": [
+			{"type": "predicate", "name": "first", "instructions": "Is it?"},
+			{"type": "predicate", "name": "second", "instructions": "Is it still?"}
+		]
+	}`))
 	require.NoError(t, err)
-	encoded, err := request.SystemOneBody()
+
+	response, err := ParseSystemOneResponse([]byte(`{
+		"model": "jev-1.13.0",
+		"answers": {
+			"first": {"type": "mystery", "value": 1},
+			"second": {"type": "noul", "noul": 0.4}
+		}
+	}`))
 	require.NoError(t, err)
-	require.JSONEq(t, string(body), string(encoded))
+
+	encoded, err := request.OpenAIResponseBody(response)
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"model": "jev-1.13.0",
+		"answers": [
+			{"type": "refusal", "name": "first"},
+			{"type": "predicate", "name": "second", "probability": 0.4}
+		],
+		"usage": {
+			"input_tokens": 0,
+			"input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+			"output_tokens": 0,
+			"output_tokens_details": {"reasoning_tokens": 0},
+			"total_tokens": 0
+		}
+	}`, string(encoded))
+}
+
+func TestSystemOneRequestModel(t *testing.T) {
+	model, err := SystemOneRequestModel([]byte(`{"model":"jev-latest","state":"hello","questions":{"q":{"type":"noul"}}}`))
+	require.NoError(t, err)
+	require.Equal(t, "jev-latest", model)
+
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"malformed json", `{"model":`, "JSON object"},
+		{"not an object", `[]`, "JSON object"},
+		{"missing model", `{"state":"hello","questions":{}}`, "model is required"},
+		{"non-string model", `{"model":5}`, "model must be a string"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := SystemOneRequestModel([]byte(tt.body))
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestValidateForSystemOneRejectsBoxAndStream(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "box question",
+			body: `{"model":"m","input":"x","questions":[{"type":"box","name":"area","instructions":"Where is it?"}]}`,
+			want: "box questions are not supported",
+		},
+		{
+			name: "stream",
+			body: `{"model":"m","input":"x","stream":true,"questions":[{"type":"predicate","name":"q","instructions":"q"}]}`,
+			want: "stream is not supported",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request, err := ParseOpenAIRequest([]byte(tt.body))
+			require.NoError(t, err)
+			require.ErrorContains(t, request.ValidateForSystemOne(), tt.want)
+		})
+	}
 }
 
 func TestOpenAIInputMessagesBecomeSystemOneState(t *testing.T) {
@@ -235,6 +317,18 @@ func TestOpenAIRejectsInvalidRequests(t *testing.T) {
 			name: "unsupported type",
 			body: `{"model":"m","input":"x","questions":[{"type":"ranking","instructions":"q"}]}`,
 		},
+		{
+			name: "non-string model",
+			body: `{"model":5,"input":"x","questions":[{"type":"predicate","instructions":"q"}]}`,
+		},
+		{
+			name: "non-string name",
+			body: `{"model":"m","input":"x","questions":[{"type":"predicate","name":{"nested":true},"instructions":"q"}]}`,
+		},
+		{
+			name: "non-boolean stream",
+			body: `{"model":"m","input":"x","stream":"yes","questions":[{"type":"predicate","instructions":"q"}]}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -259,43 +353,4 @@ func TestValidateForSystemOneRejectsImages(t *testing.T) {
 	}`))
 	require.NoError(t, err)
 	require.ErrorContains(t, request.ValidateForSystemOne(), "input_image")
-}
-
-func TestSystemOneResponseBody(t *testing.T) {
-	request, err := ParseOpenAIRequest([]byte(`{
-		"model": "luna",
-		"input": "hello",
-		"questions": [
-			{"type": "predicate", "name": "yes", "instructions": "Is it?"},
-			{"type": "choice", "name": "pick", "instructions": "Pick", "choices": [{"value": true}, {"value": false}]}
-		]
-	}`))
-	require.NoError(t, err)
-
-	encoded, err := request.SystemOneResponseBody(&Response{
-		Model: "jev-1.13.0",
-		Answers: map[string]Answer{
-			"yes": {Type: TypePredicate, Noul: ptr(0.75)},
-			"pick": {
-				Type:          TypeChoice,
-				Choice:        ptr("true"),
-				Confidence:    ptr(0.8),
-				Probabilities: map[string]float64{"true": 0.8, "false": 0.2},
-			},
-		},
-		Usage: &Usage{InputTokens: 5, OutputTokens: 2},
-	})
-	require.NoError(t, err)
-
-	var decoded map[string]any
-	require.NoError(t, json.Unmarshal(encoded, &decoded))
-	require.Equal(t, "jev-1.13.0", decoded["model"])
-	require.Equal(t, map[string]any{
-		"yes":  map[string]any{"type": "noul", "noul": 0.75},
-		"pick": map[string]any{"type": "choice", "choice": "true", "probabilities": map[string]any{"true": 0.8, "false": 0.2}, "confidence": 0.8},
-	}, decoded["answers"])
-}
-
-func ptr[T any](value T) *T {
-	return &value
 }
